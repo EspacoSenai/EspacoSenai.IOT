@@ -1,6 +1,4 @@
-Claro, aqui está um resumo focado no ESP32 para aplicações de IoT:
-
-Resumo: O Papel do ESP32 em Projetos de IoT
+  O Papel do ESP32 em Projetos de IoT
 O ESP32 é um microcontrolador de baixo custo e alto desempenho, ideal para o desenvolvimento de projetos de Internet das Coisas (IoT). Ele se destaca por integrar em um único chip recursos essenciais de conectividade e processamento, tornando-o uma escolha popular entre hobistas e profissionais.
 
 O que torna o ESP32 ideal para IoT?
