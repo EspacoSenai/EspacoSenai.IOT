@@ -1,0 +1,51 @@
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f4f4f4;
+  text-align: center;
+  padding: 50px;
+}
+
+h1 {
+  color: #333;
+  margin-bottom: 40px;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+}
+
+button {
+  padding: 15px 30px;
+  font-size: 16px;
+  cursor: pointer;
+  border: none;
+  border-radius: 5px;
+  transition: transform 0.1s ease-in-out;
+}
+
+button:hover {
+  transform: scale(1.05);
+}
+
+.red {
+  background-color: #f44336;
+  color: white;
+}
+
+.green {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.yellow {
+  background-color: #FFEB3B;
+  color: black;
+}
+
+.rele {
+  background-color: #2196F3;
+  color: white;
+}
