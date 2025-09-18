@@ -2,23 +2,22 @@
 #include <Keypad.h>
 #include <LiquidCrystal.h>
 #include <WebServer.h>
-#include <DHT.h>  // Adicionar a biblioteca DHT
+#include <DHT.h>
 
-// Pinos dos LEDs e relé
+// --- Definições de Pinos ---
 #define ledRed 18
 #define ledGreen 21
 #define ledYellow 22
 #define RELE4 23
 
-// Definir pino e tipo do sensor DHT
-#define DHT_PIN 34
+#define DHT_PIN 34      // ⚠️ Se der erro, troque para pino 15, 4 ou 5
 #define DHT_TYPE DHT22
-DHT dht(DHT_PIN, DHT_TYPE); // Inicializa o sensor DHT
+DHT dht(DHT_PIN, DHT_TYPE);
 
 // LCD: rs, en, d4, d5, d6, d7
 LiquidCrystal lcd(15, 2, 4, 5, 32, 35);
 
-// Teclado matricial
+// Teclado Matricial
 const byte ROWS = 4;
 const byte COLS = 3;
 char keys[ROWS][COLS] = {
@@ -43,6 +42,10 @@ IPAddress subnet(255, 255, 255, 0);
 // Servidor HTTP
 WebServer server(80);
 
+// Temperatura
+float lastTemperature = NAN;
+unsigned long lastDHTRead = 0;
+
 void setup() {
   Serial.begin(115200);
 
@@ -55,7 +58,6 @@ void setup() {
   pinMode(ledYellow, OUTPUT);
   pinMode(RELE4, OUTPUT);
 
-  // Inicia todos desligados (nível HIGH, se relé for LOW ativo)
   digitalWrite(ledRed, HIGH);
   digitalWrite(ledGreen, HIGH);
   digitalWrite(ledYellow, HIGH);
@@ -97,33 +99,44 @@ void setup() {
   Serial.print("IP local: ");
   Serial.println(WiFi.localIP());
 
-  // Inicia o sensor DHT
   dht.begin();
 
-  // Inicia servidor e define rotas
   server.on("/", handleRoot);
   server.on("/led", HTTP_POST, handleLed);
-  server.on("/temperature", HTTP_GET, handleTemperature);  // Nova rota para temperatura
+  server.on("/temperature", HTTP_GET, handleTemperature);
   server.begin();
   Serial.println("Servidor HTTP iniciado.");
 }
 
 void loop() {
-  server.handleClient();  // Lida com requisições HTTP
-  char key = keypad.getKey();
+  server.handleClient();
 
+  // Leitura do teclado
+  char key = keypad.getKey();
   if (key != NO_KEY) {
     Serial.println(key);
     tratarEntrada(key);
   }
+
+  // Leitura periódica do DHT22 (a cada 2 segundos)
+  if (millis() - lastDHTRead > 2000) {
+    float temp = dht.readTemperature();
+    if (!isnan(temp)) {
+      lastTemperature = temp;
+      Serial.print("Temperatura atualizada: ");
+      Serial.println(lastTemperature);
+    } else {
+      Serial.println("Falha ao ler o sensor DHT");
+    }
+    lastDHTRead = millis();
+  }
 }
 
-// Rota principal
+// --- Rotas Web ---
 void handleRoot() {
   server.send(200, "text/plain", "ESP32 Web Server ativo.");
 }
 
-// Rota para controle dos LEDs e relé
 void handleLed() {
   if (!server.hasArg("led")) {
     server.send(400, "text/plain", "Parâmetro 'led' não informado.");
@@ -156,20 +169,17 @@ void handleLed() {
   server.send(200, "text/plain", response);
 }
 
-// Rota para ler a temperatura do DHT22
 void handleTemperature() {
-  float temperature = dht.readTemperature();  // Ler temperatura em Celsius
-
-  if (isnan(temperature)) {
-    server.send(500, "text/plain", "Falha ao ler o sensor de temperatura.");
+  if (isnan(lastTemperature)) {
+    server.send(500, "text/plain", "Temperatura não disponível.");
     return;
   }
 
-  String response = "{\"temperature\": " + String(temperature) + "}";
-  server.send(200, "application/json", response);  // Retornar temperatura em formato JSON
+  String response = "{\"temperature\": " + String(lastTemperature) + "}";
+  server.send(200, "application/json", response);
 }
 
-// Teclado físico
+// --- Entrada do Teclado ---
 void tratarEntrada(char entrada) {
   switch (entrada) {
     case '1':
