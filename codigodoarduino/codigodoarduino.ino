@@ -2,12 +2,18 @@
 #include <Keypad.h>
 #include <LiquidCrystal.h>
 #include <WebServer.h>
+#include <DHT.h>  // Adicionar a biblioteca DHT
 
 // Pinos dos LEDs e relé
 #define ledRed 18
 #define ledGreen 21
 #define ledYellow 22
 #define RELE4 23
+
+// Definir pino e tipo do sensor DHT
+#define DHT_PIN 34
+#define DHT_TYPE DHT22
+DHT dht(DHT_PIN, DHT_TYPE); // Inicializa o sensor DHT
 
 // LCD: rs, en, d4, d5, d6, d7
 LiquidCrystal lcd(15, 2, 4, 5, 32, 35);
@@ -91,9 +97,13 @@ void setup() {
   Serial.print("IP local: ");
   Serial.println(WiFi.localIP());
 
+  // Inicia o sensor DHT
+  dht.begin();
+
   // Inicia servidor e define rotas
   server.on("/", handleRoot);
   server.on("/led", HTTP_POST, handleLed);
+  server.on("/temperature", HTTP_GET, handleTemperature);  // Nova rota para temperatura
   server.begin();
   Serial.println("Servidor HTTP iniciado.");
 }
@@ -144,6 +154,19 @@ void handleLed() {
   lcd.clear();
   lcd.print(response);
   server.send(200, "text/plain", response);
+}
+
+// Rota para ler a temperatura do DHT22
+void handleTemperature() {
+  float temperature = dht.readTemperature();  // Ler temperatura em Celsius
+
+  if (isnan(temperature)) {
+    server.send(500, "text/plain", "Falha ao ler o sensor de temperatura.");
+    return;
+  }
+
+  String response = "{\"temperature\": " + String(temperature) + "}";
+  server.send(200, "application/json", response);  // Retornar temperatura em formato JSON
 }
 
 // Teclado físico
