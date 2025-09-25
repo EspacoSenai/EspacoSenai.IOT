@@ -24,6 +24,7 @@ button {
   border: none;
   border-radius: 5px;
   transition: transform 0.1s ease-in-out;
+  margin-bottom: 20px;
 }
 
 button:hover {
@@ -48,4 +49,26 @@ button:hover {
 .rele {
   background-color: #2196F3;
   color: white;
+}
+
+.temperature {
+  margin-top: 40px;
+}
+
+.temperature h2 {
+  font-size: 24px;
+  color: #333;
+  margin-bottom: 20px;
+}
+
+.temperature button {
+  background-color: #FFC107;
+  color: white;
+  font-size: 18px;
+  padding: 10px 20px;
+  border-radius: 5px;
+}
+
+.temperature button:hover {
+  transform: scale(1.05);
 }
