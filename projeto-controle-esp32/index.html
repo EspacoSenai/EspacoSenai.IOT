@@ -16,6 +16,11 @@
     <button class="rele" onclick="toggleLed('rele')">RELE4</button>
   </div>
 
+  <div class="temperature">
+    <h2>Temperatura: <span id="temperatureValue">Carregando...</span> °C</h2>
+    <button onclick="fetchTemperature()">Atualizar Temperatura</button>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>
