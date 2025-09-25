@@ -1,32 +1,30 @@
-// ⚠️ Substitua pelo IP real da sua ESP32
-const ESP32_IP = "http://192.168.0.123";  // Substitua com o IP real
+const ESP32_IP = "http://192.168.0.123"; // ajuste para seu IP
 
 function toggleLed(led) {
   fetch(`${ESP32_IP}/led`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `led=${led}`,
   })
-    .then((response) => response.text())
-    .then((data) => alert(data))
-    .catch((err) => alert("Erro ao conectar: " + err));
+    .then(res => res.text())
+    .then(data => alert(data))
+    .catch(err => alert("Erro: " + err));
 }
 
-// Função para buscar a temperatura do servidor ESP32
-function fetchTemperature() {
-  fetch(`${ESP32_IP}/temperature`)
-    .then((response) => response.json())
-    .then((data) => {
-      const temp = data.temperature;
-      document.getElementById("temperatureValue").innerText = temp.toFixed(2);  // Atualiza o valor da temperatura
-    })
-    .catch((err) => {
-      alert("Erro ao obter a temperatura: " + err);
-      document.getElementById("temperatureValue").innerText = "Erro!";
-    });
+async function fetchTemperature() {
+  try {
+    const res = await fetch(`${ESP32_IP}/temperature`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    document.getElementById("temperatureValue").innerText = Number(data.temperature).toFixed(2);
+    document.getElementById("humidityValue").innerText = Number(data.humidity).toFixed(2);
+  } catch (err) {
+    console.error(err);
+    document.getElementById("temperatureValue").innerText = "Erro!";
+    document.getElementById("humidityValue").innerText = "Erro!";
+    alert("Erro ao obter dados do ESP32: " + err);
+  }
 }
 
-// Carregar a temperatura automaticamente ao carregar a página
 window.onload = fetchTemperature;
