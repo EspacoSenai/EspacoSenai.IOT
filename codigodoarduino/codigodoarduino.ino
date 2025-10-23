@@ -1,34 +1,26 @@
 #include <WiFi.h>
 #include <Keypad.h>
-#include <LiquidCrystal.h>
 #include <WebServer.h>
-#include <DHT.h>
-
-// -------- CONFIG SENSOR --------
-#define DHTPIN 15      // pino DATA do AM2302
-#define DHTTYPE DHT22  // AM2302 é compatível com DHT22
-DHT dht(DHTPIN, DHTTYPE);
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 
 // -------- CONFIG LEDS / RELÉ --------
 #define ledRed 18
-#define ledGreen 21
-#define ledYellow 22
-#define RELE4 23
+#define ledGreen 19
+#define ledYellow 21
+#define RELE4 22
 
-// LCD: rs, en, d4, d5, d6, d7
-LiquidCrystal lcd(15, 2, 4, 5, 32, 35);
-
-// -------- TECLADO --------
+// -------- TECLADO (3x4) --------
 const byte ROWS = 4;
 const byte COLS = 3;
 char keys[ROWS][COLS] = {
   {'1','2','3'},
   {'4','5','6'},
   {'7','8','9'},
-  {'#','0','*'}
+  {'*','0','#'}
 };
-byte rowPins[ROWS] = {33, 25, 26, 27};
-byte colPins[COLS] = {14, 12, 13};
+byte rowPins[ROWS] = {13, 12, 14, 27};
+byte colPins[COLS] = {26, 25, 33};
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // -------- WIFI --------
@@ -41,23 +33,29 @@ IPAddress subnet(255, 255, 255, 0);
 // -------- SERVIDOR --------
 WebServer server(80);
 
+// -------- VARIÁVEIS GLOBAIS --------
+String pinBuffer = "";
+bool energia = false;  // variável recebida da API
+
+// -------- CONFIG API --------
+const char* apiURL = "http://seu-backend.com/api/pin";  // <-- coloque aqui sua rota de API
+
+// ---------- FUNÇÕES ----------
+void handleRoot();
+void handlePin();
+void tratarEntrada(char entrada);
+void enviarPinParaAPI(String pin);
+
 void addCorsHeaders() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-void handleRoot();
-void handleLed();
-void handleTemperature();
-void tratarEntrada(char entrada);
-
+// ---------- SETUP ----------
 void setup() {
   Serial.begin(115200);
-
-  lcd.begin(16, 4);
-  lcd.clear();
-  lcd.print("Iniciando...");
+  Serial.println("Iniciando...");
 
   pinMode(ledRed, OUTPUT);
   pinMode(ledGreen, OUTPUT);
@@ -69,10 +67,6 @@ void setup() {
   digitalWrite(ledYellow, HIGH);
   digitalWrite(RELE4, HIGH);
 
-  // inicia sensor
-  dht.begin();
-
-  // WiFi
   if (!WiFi.config(local_IP, gateway, subnet)) {
     Serial.println("Falha IP fixo, usando DHCP");
   }
@@ -82,152 +76,125 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED && tentativas < 40) {
     delay(500);
     Serial.print(".");
-    lcd.setCursor(tentativas % 16, 2);
-    lcd.print(".");
     tentativas++;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    lcd.setCursor(0, 2);
-    lcd.print("Conectado!");
-    lcd.setCursor(0, 3);
-    lcd.print(WiFi.localIP());
-    Serial.println();
-    Serial.print("Wi-Fi conectado. IP: ");
+    Serial.println("\nWi-Fi conectado!");
+    Serial.print("IP: ");
     Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("Falha ao conectar ao Wi-Fi.");
   }
 
-  // rotas
+  // ---------- ROTAS ----------
   server.on("/", HTTP_GET, handleRoot);
-  server.on("/led", HTTP_POST, handleLed);
-  server.on("/led", HTTP_OPTIONS, [](){
-    addCorsHeaders();
-    server.send(204, "text/plain", "");
-  });
+  server.on("/pin", HTTP_POST, handlePin);
 
-  server.on("/temperature", HTTP_GET, handleTemperature);
-  server.on("/temperature", HTTP_OPTIONS, [](){
+  // habilitar CORS para OPTIONS
+  server.onNotFound([](){
     addCorsHeaders();
-    server.send(204, "text/plain", "");
+    server.send(404, "text/plain", "Not found");
   });
 
   server.begin();
   Serial.println("Servidor HTTP iniciado.");
 }
 
+// ---------- LOOP ----------
 void loop() {
   server.handleClient();
   char key = keypad.getKey();
   if (key != NO_KEY) {
+    Serial.print("Tecla pressionada: ");
     Serial.println(key);
     tratarEntrada(key);
   }
 }
 
-// ---- Rotas ----
+// ---------- ROTAS ----------
 void handleRoot() {
   addCorsHeaders();
   server.send(200, "text/plain", "ESP32 Web Server ativo.");
 }
 
-void handleLed() {
+// ---- RECEBE PIN VIA API ----
+void handlePin() {
   addCorsHeaders();
-  if (!server.hasArg("led")) {
-    server.send(400, "text/plain", "Parâmetro 'led' não informado.");
-    return;
-  }
-  String led = server.arg("led");
-  String response;
-
-  if (led == "red") {
-    digitalWrite(ledRed, !digitalRead(ledRed));
-    response = "LED Vermelho alternado.";
-  } else if (led == "green") {
-    digitalWrite(ledGreen, !digitalRead(ledGreen));
-    response = "LED Verde alternado.";
-  } else if (led == "yellow") {
-    digitalWrite(ledYellow, !digitalRead(ledYellow));
-    response = "LED Amarelo alternado.";
-  } else if (led == "rele") {
-    digitalWrite(RELE4, !digitalRead(RELE4));
-    response = "RELE4 alternado.";
-  } else {
-    server.send(400, "text/plain", "Valor inválido para 'led'.");
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"erro\":\"Sem corpo JSON\"}");
     return;
   }
 
-  Serial.println(response);
-  lcd.clear();
-  lcd.print(response);
-  server.send(200, "text/plain", response);
-}
+  String body = server.arg("plain");
+  StaticJsonDocument<200> doc;
+  DeserializationError err = deserializeJson(doc, body);
 
-// ---- SENSOR TEMPERATURA + UMIDADE ----
-void handleTemperature() {
-  float temp = dht.readTemperature();
-  float hum = dht.readHumidity();
-
-  if (isnan(temp) || isnan(hum)) {
-    addCorsHeaders();
-    server.send(500, "application/json", "{\"error\":\"Falha ao ler DHT\"}");
-    Serial.println("Falha ao ler do DHT");
+  if (err || !doc.containsKey("pin")) {
+    server.send(400, "application/json", "{\"erro\":\"JSON inválido\"}");
     return;
   }
 
-  String json = "{\"temperature\":" + String(temp, 2) +
-                ", \"humidity\":" + String(hum, 2) + "}";
-
-  addCorsHeaders();
+  String pin = doc["pin"];
+  enviarPinParaAPI(pin);
+  String json = "{\"energia\":" + String(energia ? "true" : "false") + "}";
   server.send(200, "application/json", json);
-
-  Serial.print("Temperatura: ");
-  Serial.print(temp);
-  Serial.print(" °C | Umidade: ");
-  Serial.print(hum);
-  Serial.println(" %");
-
-  lcd.clear();
-  lcd.print("Temp:");
-  lcd.print(temp, 1);
-  lcd.print("C");
-  lcd.setCursor(0, 1);
-  lcd.print("Umid:");
-  lcd.print(hum, 1);
-  lcd.print("%");
 }
 
 // ---- TECLADO ----
 void tratarEntrada(char entrada) {
-  switch (entrada) {
-    case '1': case '5':
-      digitalWrite(ledRed, !digitalRead(ledRed));
-      lcd.clear();
-      lcd.print("LED Vermelho: ");
-      lcd.print(digitalRead(ledRed) == LOW ? "ON" : "OFF");
-      break;
-    case '2': case '6':
-      digitalWrite(ledGreen, !digitalRead(ledGreen));
-      lcd.clear();
-      lcd.print("LED Verde: ");
-      lcd.print(digitalRead(ledGreen) == LOW ? "ON" : "OFF");
-      break;
-    case '3': case '7':
-      digitalWrite(ledYellow, !digitalRead(ledYellow));
-      lcd.clear();
-      lcd.print("LED Amarelo: ");
-      lcd.print(digitalRead(ledYellow) == LOW ? "ON" : "OFF");
-      break;
-    case '4': case '8':
-      digitalWrite(RELE4, !digitalRead(RELE4));
-      lcd.clear();
-      lcd.print("RELE4: ");
-      lcd.print(digitalRead(RELE4) == LOW ? "ON" : "OFF");
-      break;
-    default:
-      lcd.setCursor(0, 1);
-      lcd.print("Tecla: ");
-      lcd.print(entrada);
-      lcd.print(" - Sem acao");
-      break;
+  if (entrada >= '0' && entrada <= '9') {
+    if (pinBuffer.length() < 4) {
+      pinBuffer += entrada;
+      Serial.print("PIN parcial: ");
+      Serial.println(pinBuffer);
+    }
+  } 
+  else if (entrada == '*') {
+    if (pinBuffer.length() == 4) {
+      Serial.println("Enviando PIN...");
+      enviarPinParaAPI(pinBuffer);
+      pinBuffer = "";
+    } else {
+      Serial.println("PIN incompleto, necessário 4 dígitos.");
+    }
+  } 
+  else if (entrada == '#') {
+    pinBuffer = "";
+    Serial.println("PIN resetado.");
   }
+}
+
+// ---- ENVIO PARA API EXTERNA ----
+void enviarPinParaAPI(String pin) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Sem WiFi - não foi possível enviar PIN.");
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(apiURL);
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonBody = "{\"pin\":\"" + pin + "\"}";
+  int httpCode = http.POST(jsonBody);
+
+  if (httpCode > 0) {
+    String payload = http.getString();
+    Serial.println("Resposta da API: " + payload);
+
+    StaticJsonDocument<200> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (!error && doc.containsKey("energia")) {
+      energia = doc["energia"];
+      Serial.print("Energia agora: ");
+      Serial.println(energia ? "ATIVA" : "DESLIGADA");
+    } else {
+      Serial.println("Erro ao interpretar resposta JSON da API.");
+    }
+  } else {
+    Serial.printf("Erro HTTP: %d\n", httpCode);
+  }
+
+  http.end();
 }
