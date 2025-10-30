@@ -3,12 +3,19 @@
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include "DHT.h"
 
 // -------- CONFIG LEDS / RELÉ --------
 #define ledRed 18
 #define ledGreen 19
 #define ledYellow 21
 #define RELE4 22
+
+// -------- SENSOR DE TEMPERATURA (AM2302 / DHT22) --------
+#define DHTPIN 4        // pino onde o sinal do AM2302 está ligado
+#define DHTTYPE DHT22   // tipo de sensor
+DHT dht(DHTPIN, DHTTYPE);
+float temperatura = 0.0;
 
 // -------- TECLADO (3x4) --------
 const byte ROWS = 4;
@@ -43,6 +50,7 @@ const char* apiURL = "http://seu-backend.com/api/pin";  // <-- coloque aqui sua 
 // ---------- FUNÇÕES ----------
 void handleRoot();
 void handlePin();
+void handleTemp();
 void tratarEntrada(char entrada);
 void enviarPinParaAPI(String pin);
 
@@ -67,6 +75,8 @@ void setup() {
   digitalWrite(ledYellow, HIGH);
   digitalWrite(RELE4, HIGH);
 
+  dht.begin(); // inicia o sensor AM2302
+
   if (!WiFi.config(local_IP, gateway, subnet)) {
     Serial.println("Falha IP fixo, usando DHCP");
   }
@@ -90,6 +100,7 @@ void setup() {
   // ---------- ROTAS ----------
   server.on("/", HTTP_GET, handleRoot);
   server.on("/pin", HTTP_POST, handlePin);
+  server.on("/temp", HTTP_GET, handleTemp);  // nova rota para temperatura
 
   // habilitar CORS para OPTIONS
   server.onNotFound([](){
@@ -104,6 +115,23 @@ void setup() {
 // ---------- LOOP ----------
 void loop() {
   server.handleClient();
+
+  // leitura da temperatura periodicamente
+  static unsigned long lastRead = 0;
+  if (millis() - lastRead > 5000) {  // a cada 5 segundos
+    lastRead = millis();
+    float temp = dht.readTemperature();
+    if (isnan(temp)) {
+      Serial.println("Erro ao ler temperatura do AM2302!");
+    } else {
+      temperatura = temp;
+      Serial.print("Temperatura atual: ");
+      Serial.print(temperatura);
+      Serial.println(" °C");
+    }
+  }
+
+  // leitura do teclado
   char key = keypad.getKey();
   if (key != NO_KEY) {
     Serial.print("Tecla pressionada: ");
@@ -138,6 +166,13 @@ void handlePin() {
   String pin = doc["pin"];
   enviarPinParaAPI(pin);
   String json = "{\"energia\":" + String(energia ? "true" : "false") + "}";
+  server.send(200, "application/json", json);
+}
+
+// ---- RETORNA TEMPERATURA ----
+void handleTemp() {
+  addCorsHeaders();
+  String json = "{\"temperatura\":" + String(temperatura, 1) + "}";
   server.send(200, "application/json", json);
 }
 
