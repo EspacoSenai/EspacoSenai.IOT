@@ -11,46 +11,25 @@ function toggleLed(led) {
     body: `led=${led}`,
   })
     .then((response) => response.text())
-    .then((data) => alert(data))
+    .then((data) => alert(`LED ${led.toUpperCase()} -> ${data}`))
     .catch((err) => alert("Erro ao conectar: " + err));
 }
 
-// ---------------- TEMPERATURA + UMIDADE ----------------
+// ---------------- TEMPERATURA ----------------
 function fetchTemperature() {
-  fetch(`${ESP32_IP}/temperature`)
+  fetch(`${ESP32_IP}/temp`)
     .then((response) => response.json())
     .then((data) => {
-      const temp = data.temperature;
-      const hum = data.humidity;
-      document.getElementById("temperatureValue").innerText = temp.toFixed(2);
-      document.getElementById("humidityValue").innerText = hum.toFixed(2);
+      const temp = data.temperatura;
+      document.getElementById("temperatureValue").innerText = temp.toFixed(1);
     })
     .catch((err) => {
       console.error(err);
       document.getElementById("temperatureValue").innerText = "Erro";
-      document.getElementById("humidityValue").innerText = "Erro";
     });
 }
 
-// ---------------- ENERGIA (boolean) ----------------
-function fetchEnergia() {
-  fetch(`${ESP32_IP}/energia`)
-    .then((response) => response.json())
-    .then((data) => {
-      const energia = data.energia;
-      const statusEl = document.getElementById("energiaStatus");
-      statusEl.innerText = energia ? "ATIVA" : "DESLIGADA";
-      statusEl.style.color = energia ? "green" : "red";
-    })
-    .catch((err) => {
-      console.error("Erro ao obter energia:", err);
-      const statusEl = document.getElementById("energiaStatus");
-      statusEl.innerText = "Erro";
-      statusEl.style.color = "gray";
-    });
-}
-
-// ---------------- ENVIAR PIN MANUALMENTE ----------------
+// ---------------- ENVIAR PIN ----------------
 function enviarPin() {
   const pin = document.getElementById("pinInput").value.trim();
 
@@ -65,10 +44,9 @@ function enviarPin() {
     body: JSON.stringify({ pin }),
   })
     .then((response) => response.json())
-    .then((data) => {
-      const energia = data.energia;
-      alert(`PIN enviado! Energia: ${energia ? "ATIVA" : "DESLIGADA"}`);
-      fetchEnergia(); // atualiza status na tela
+    .then(() => {
+      alert(`PIN ${pin} enviado com sucesso!`);
+      document.getElementById("pinInput").value = "";
     })
     .catch((err) => {
       console.error(err);
@@ -77,13 +55,7 @@ function enviarPin() {
 }
 
 // ---------------- AUTO-ATUALIZAÇÃO ----------------
-function atualizarTudo() {
-  fetchTemperature();
-  fetchEnergia();
-}
-
-// Carrega tudo ao iniciar
 window.onload = function() {
-  atualizarTudo();
-  setInterval(atualizarTudo, 5000); // Atualiza a cada 5s
+  fetchTemperature();
+  setInterval(fetchTemperature, 5000); // Atualiza a cada 5s
 };
