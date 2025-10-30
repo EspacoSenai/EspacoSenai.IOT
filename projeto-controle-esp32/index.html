@@ -1,25 +1,40 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Controle ESP32</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8">
+  <title>Painel ESP32 - Controle & Temperatura</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>Controle ESP32</h1>
+  <div class="container">
+    <h1>🌡️ Painel ESP32</h1>
 
-  <div class="buttons">
-    <button class="red" onclick="toggleLed('red')">LED Vermelho</button>
-    <button class="green" onclick="toggleLed('green')">LED Verde</button>
-    <button class="yellow" onclick="toggleLed('yellow')">LED Amarelo</button>
-    <button class="rele" onclick="toggleLed('rele')">RELE4</button>
-  </div>
+    <section class="temp-section">
+      <h2>Temperatura Atual</h2>
+      <div class="temp-display">
+        <span id="temperatureValue">--</span><span class="unit">°C</span>
+      </div>
+      <button onclick="fetchTemperature()">Atualizar</button>
+    </section>
 
-  <div class="temperature">
-    <h2>Temperatura: <span id="temperatureValue">Carregando...</span> °C</h2>
-    <h2>Umidade: <span id="humidityValue">Carregando...</span> %</h2>
-    <button onclick="fetchTemperature()">Atualizar</button>
+    <section class="led-section">
+      <h2>Controle de LEDs</h2>
+      <div class="led-buttons">
+        <button class="led-btn red" onclick="toggleLed('red')">🔴 Vermelho</button>
+        <button class="led-btn yellow" onclick="toggleLed('yellow')">🟡 Amarelo</button>
+        <button class="led-btn green" onclick="toggleLed('green')">🟢 Verde</button>
+      </div>
+    </section>
+
+    <section class="pin-section">
+      <h2>Envio de PIN</h2>
+      <input type="text" id="pinInput" maxlength="4" placeholder="Digite o PIN" />
+      <button onclick="enviarPin()">Enviar</button>
+    </section>
+
+    <footer>
+      <p>ESP32 Web Interface • Desenvolvido por Você 💡</p>
+    </footer>
   </div>
 
   <script src="script.js"></script>
