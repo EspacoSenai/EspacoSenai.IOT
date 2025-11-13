@@ -6,14 +6,15 @@
 #include "DHT.h"
 
 // -------- CONFIG LEDS / RELÉ --------
-#define ledRed 18
-#define ledGreen 19
-#define ledYellow 21
-#define RELE4 22
+#define ledRed 5      // D2
+#define ledGreen 4    // D4
+#define ledYellow 3   // D5
+#define RELE4 15
+
 
 // -------- SENSOR DE TEMPERATURA (AM2302 / DHT22) --------
-#define DHTPIN 4        // pino onde o sinal do AM2302 está ligado
-#define DHTTYPE DHT22   // tipo de sensor
+#define DHTPIN 18     // DHT22 no D18
+#define DHTTYPE DHT22  // tipo de sensor
 DHT dht(DHTPIN, DHTTYPE);
 float temperatura = 0.0;
 
@@ -26,13 +27,17 @@ char keys[ROWS][COLS] = {
   {'7','8','9'},
   {'*','0','#'}
 };
-byte rowPins[ROWS] = {13, 12, 14, 27};
-byte colPins[COLS] = {26, 25, 33};
+
+// Portas para as linhas (ROWS) e colunas (COLS)
+byte rowPins[ROWS] = {32, 33, 25, 26};   // D13 a D16 para as linhas (ROWS)
+byte colPins[COLS] = {27, 14, 12};      // D17 a D19 para as colunas (COLS)
+
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
+
 // -------- WIFI --------
-const char* ssid = "Senai";
-const char* password = "Senaisp@115";
+const char* ssid = "AAPM";
+const char* password = "alunosenai";
 IPAddress local_IP(192, 168, 0, 123);
 IPAddress gateway(192, 168, 0, 1);
 IPAddress subnet(255, 255, 255, 0);
