@@ -6,17 +6,20 @@
 #include "DHT.h"
 
 // -------- CONFIG LEDS / RELÉ --------
-#define ledRed 5      // D2
+#define ledRed 2      // D2
 #define ledGreen 4    // D4
-#define ledYellow 3   // D5
-#define RELE4 15
-
+#define ledYellow 5   // D5
+#define RELE4 22      // Relé no D22
 
 // -------- SENSOR DE TEMPERATURA (AM2302 / DHT22) --------
-#define DHTPIN 18     // DHT22 no D18
-#define DHTTYPE DHT22  // tipo de sensor
-DHT dht(DHTPIN, DHTTYPE);
-float temperatura = 0.0;
+#define DHTPIN1 18     // Sensor 1 no D18
+#define DHTPIN2 35     // Sensor 2 no D35
+#define DHTTYPE DHT22  // Tipo de sensor
+DHT dht1(DHTPIN1, DHTTYPE);
+DHT dht2(DHTPIN2, DHTTYPE);
+
+float temperatura1 = 0.0;
+float temperatura2 = 0.0;
 
 // -------- TECLADO (3x4) --------
 const byte ROWS = 4;
@@ -27,37 +30,27 @@ char keys[ROWS][COLS] = {
   {'7','8','9'},
   {'*','0','#'}
 };
-
-// Portas para as linhas (ROWS) e colunas (COLS)
-byte rowPins[ROWS] = {32, 33, 25, 26};   // D13 a D16 para as linhas (ROWS)
-byte colPins[COLS] = {27, 14, 12};      // D17 a D19 para as colunas (COLS)
-
+byte rowPins[ROWS] = {13, 14, 15, 16};   // D13 a D16 para as linhas (ROWS)
+byte colPins[COLS] = {17, 18, 19};      // D17 a D19 para as colunas (COLS)
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
-
-
-// -------- WIFI --------
-const char* ssid = "AAPM";
-const char* password = "alunosenai";
-IPAddress local_IP(192, 168, 0, 123);
-IPAddress gateway(192, 168, 0, 1);
-IPAddress subnet(255, 255, 255, 0);
-
-// -------- SERVIDOR --------
-WebServer server(80);
 
 // -------- VARIÁVEIS GLOBAIS --------
 String pinBuffer = "";
 bool energia = false;  // variável recebida da API
+int ledStatus1 = LOW;  // Status do LED do sensor 1
+int ledStatus2 = LOW;  // Status do LED do sensor 2
 
 // -------- CONFIG API --------
 const char* apiURL = "http://seu-backend.com/api/pin";  // <-- coloque aqui sua rota de API
 
 // ---------- FUNÇÕES ----------
+
 void handleRoot();
 void handlePin();
 void handleTemp();
 void tratarEntrada(char entrada);
 void enviarPinParaAPI(String pin);
+void atualizarLEDs(bool token, int sensorId);
 
 void addCorsHeaders() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -75,18 +68,15 @@ void setup() {
   pinMode(ledYellow, OUTPUT);
   pinMode(RELE4, OUTPUT);
 
-  digitalWrite(ledRed, HIGH);
-  digitalWrite(ledGreen, HIGH);
-  digitalWrite(ledYellow, HIGH);
+  digitalWrite(ledRed, LOW);
+  digitalWrite(ledGreen, LOW);
+  digitalWrite(ledYellow, LOW);
   digitalWrite(RELE4, HIGH);
 
-  dht.begin(); // inicia o sensor AM2302
+  dht1.begin();  // Inicializa o primeiro sensor (DHT1)
+  dht2.begin();  // Inicializa o segundo sensor (DHT2)
 
-  if (!WiFi.config(local_IP, gateway, subnet)) {
-    Serial.println("Falha IP fixo, usando DHCP");
-  }
   WiFi.begin(ssid, password);
-
   int tentativas = 0;
   while (WiFi.status() != WL_CONNECTED && tentativas < 40) {
     delay(500);
@@ -102,12 +92,10 @@ void setup() {
     Serial.println("Falha ao conectar ao Wi-Fi.");
   }
 
-  // ---------- ROTAS ----------
   server.on("/", HTTP_GET, handleRoot);
   server.on("/pin", HTTP_POST, handlePin);
-  server.on("/temp", HTTP_GET, handleTemp);  // nova rota para temperatura
+  server.on("/temp", HTTP_GET, handleTemp);
 
-  // habilitar CORS para OPTIONS
   server.onNotFound([](){
     addCorsHeaders();
     server.send(404, "text/plain", "Not found");
@@ -121,22 +109,31 @@ void setup() {
 void loop() {
   server.handleClient();
 
-  // leitura da temperatura periodicamente
+  // Leitura da temperatura periodicamente
   static unsigned long lastRead = 0;
   if (millis() - lastRead > 5000) {  // a cada 5 segundos
     lastRead = millis();
-    float temp = dht.readTemperature();
-    if (isnan(temp)) {
-      Serial.println("Erro ao ler temperatura do AM2302!");
+    temperatura1 = dht1.readTemperature();
+    temperatura2 = dht2.readTemperature();
+
+    if (isnan(temperatura1)) {
+      Serial.println("Erro ao ler temperatura do DHT1!");
     } else {
-      temperatura = temp;
-      Serial.print("Temperatura atual: ");
-      Serial.print(temperatura);
+      Serial.print("Temperatura Sensor 1: ");
+      Serial.print(temperatura1);
+      Serial.println(" °C");
+    }
+
+    if (isnan(temperatura2)) {
+      Serial.println("Erro ao ler temperatura do DHT2!");
+    } else {
+      Serial.print("Temperatura Sensor 2: ");
+      Serial.print(temperatura2);
       Serial.println(" °C");
     }
   }
 
-  // leitura do teclado
+  // Leitura do teclado
   char key = keypad.getKey();
   if (key != NO_KEY) {
     Serial.print("Tecla pressionada: ");
@@ -146,12 +143,12 @@ void loop() {
 }
 
 // ---------- ROTAS ----------
+
 void handleRoot() {
   addCorsHeaders();
   server.send(200, "text/plain", "ESP32 Web Server ativo.");
 }
 
-// ---- RECEBE PIN VIA API ----
 void handlePin() {
   addCorsHeaders();
   if (!server.hasArg("plain")) {
@@ -163,25 +160,34 @@ void handlePin() {
   StaticJsonDocument<200> doc;
   DeserializationError err = deserializeJson(doc, body);
 
-  if (err || !doc.containsKey("pin")) {
+  if (err || !doc.containsKey("pin") || !doc.containsKey("token")) {
     server.send(400, "application/json", "{\"erro\":\"JSON inválido\"}");
     return;
   }
 
   String pin = doc["pin"];
+  bool token = doc["token"];
+  int sensorId = doc["id"];
+
+  // Enviar o PIN para o backend
   enviarPinParaAPI(pin);
+
+  // Atualizar o estado do LED baseado no token e no ID
+  atualizarLEDs(token, sensorId);
+
   String json = "{\"energia\":" + String(energia ? "true" : "false") + "}";
   server.send(200, "application/json", json);
 }
 
-// ---- RETORNA TEMPERATURA ----
 void handleTemp() {
   addCorsHeaders();
-  String json = "{\"temperatura\":" + String(temperatura, 1) + "}";
-  server.send(200, "application/json", json);
+  String json1 = "{\"id\":1, \"temperatura\":" + String(temperatura1, 1) + "}";
+  String json2 = "{\"id\":2, \"temperatura\":" + String(temperatura2, 1) + "}";
+  String response = "[" + json1 + "," + json2 + "]";
+  server.send(200, "application/json", response);
 }
 
-// ---- TECLADO ----
+// Função para tratar a entrada do teclado
 void tratarEntrada(char entrada) {
   if (entrada >= '0' && entrada <= '9') {
     if (pinBuffer.length() < 4) {
@@ -205,7 +211,7 @@ void tratarEntrada(char entrada) {
   }
 }
 
-// ---- ENVIO PARA API EXTERNA ----
+// Função para enviar o PIN para a API
 void enviarPinParaAPI(String pin) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Sem WiFi - não foi possível enviar PIN.");
@@ -236,5 +242,3 @@ void enviarPinParaAPI(String pin) {
     Serial.printf("Erro HTTP: %d\n", httpCode);
   }
 
-  http.end();
-}
