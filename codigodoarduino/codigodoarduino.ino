@@ -5,23 +5,33 @@
 #include <ArduinoJson.h>
 #include "DHT.h"
 
-// -------- CONFIG LEDS / RELÉ --------
-#define ledRed 2      // D2
-#define ledGreen 4    // D4
-#define ledYellow 5   // D5
-#define RELE4 22      // Relé no D22
+// -------- CONFIG RELES (cada rele = uma máquina) --------
+#define RELE1 23
+#define RELE2 19
+#define RELE3 5
+#define RELE4 22
 
-// -------- SENSOR DE TEMPERATURA (AM2302 / DHT22) --------
-#define DHTPIN1 18     // Sensor 1 no D18
-#define DHTPIN2 35     // Sensor 2 no D35
-#define DHTTYPE DHT22  // Tipo de sensor
+// -------- SENSORES DE TEMPERATURA --------
+#define DHTPIN1 18 
+#define DHTPIN2 32
+#define DHTTYPE DHT22
+
 DHT dht1(DHTPIN1, DHTTYPE);
 DHT dht2(DHTPIN2, DHTTYPE);
 
-float temperatura1 = 0.0;
-float temperatura2 = 0.0;
+// --- CONFIGURAÇÃO DE MÁQUINAS (2 máquinas por enquanto) ---
+struct Maquina {
+  int id;                        // id retornado pelo backend
+  int relePin;                   // pino do rele
+  DHT* sensor;                   // sensor associado
+  bool ativa;                    // se está ligada
+  unsigned long horaFim;         // millis() de quando deve desligar
+  float ultimaTemp;              // última temperatura lida
+};
 
-// -------- TECLADO (3x4) --------
+Maquina maquinas[2];
+
+// -------- TECLADO --------
 const byte ROWS = 4;
 const byte COLS = 3;
 char keys[ROWS][COLS] = {
@@ -30,27 +40,32 @@ char keys[ROWS][COLS] = {
   {'7','8','9'},
   {'*','0','#'}
 };
-byte rowPins[ROWS] = {13, 14, 15, 16};   // D13 a D16 para as linhas (ROWS)
-byte colPins[COLS] = {17, 18, 19};      // D17 a D19 para as colunas (COLS)
+byte rowPins[ROWS] = {13, 33, 25, 26};
+byte colPins[COLS] = {27, 14, 21};
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
-// -------- VARIÁVEIS GLOBAIS --------
 String pinBuffer = "";
-bool energia = false;  // variável recebida da API
-int ledStatus1 = LOW;  // Status do LED do sensor 1
-int ledStatus2 = LOW;  // Status do LED do sensor 2
 
-// -------- CONFIG API --------
-const char* apiURL = "http://seu-backend.com/api/pin";  // <-- coloque aqui sua rota de API
+// -------- WIFI --------
+const char* ssid = "Feio";
+const char* password = "iurd2023";
 
-// ---------- FUNÇÕES ----------
+// -------- SERVIDOR --------
+WebServer server(80);
 
-void handleRoot();
-void handlePin();
-void handleTemp();
-void tratarEntrada(char entrada);
-void enviarPinParaAPI(String pin);
-void atualizarLEDs(bool token, int sensorId);
+// -------- API --------
+const char* apiURL = "http://192.168.1.6:8080";
+const char* apiTempURL = "http://192.168.1.6:8080/temperaturas";
+
+
+// -------- CONFIG TEMPERATURA --------
+unsigned long ultimoEnvioTemp = 0;
+const unsigned long intervaloTemp = 15000; // 3 min
+const float limiteTemperatura = 15;        // se estiver abaixo disso, desligar
+
+// ------------------------------------------------------
+// ---------------------- FUNÇÕES -----------------------
+// ------------------------------------------------------
 
 void addCorsHeaders() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -58,163 +73,68 @@ void addCorsHeaders() {
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// ---------- SETUP ----------
-void setup() {
-  Serial.begin(115200);
-  Serial.println("Iniciando...");
+void setupMaquinas() {
+  maquinas[0] = {1, RELE1, &dht1, false, 0, 0};
+  maquinas[1] = {2, RELE2, &dht2, false, 0, 0};
 
-  pinMode(ledRed, OUTPUT);
-  pinMode(ledGreen, OUTPUT);
-  pinMode(ledYellow, OUTPUT);
+  pinMode(RELE1, OUTPUT);
+  pinMode(RELE2, OUTPUT);
+  pinMode(RELE3, OUTPUT);
   pinMode(RELE4, OUTPUT);
 
-  digitalWrite(ledRed, LOW);
-  digitalWrite(ledGreen, LOW);
-  digitalWrite(ledYellow, LOW);
+  digitalWrite(RELE1, HIGH);
+  digitalWrite(RELE2, HIGH);
+  digitalWrite(RELE3, HIGH);
   digitalWrite(RELE4, HIGH);
-
-  dht1.begin();  // Inicializa o primeiro sensor (DHT1)
-  dht2.begin();  // Inicializa o segundo sensor (DHT2)
-
-  WiFi.begin(ssid, password);
-  int tentativas = 0;
-  while (WiFi.status() != WL_CONNECTED && tentativas < 40) {
-    delay(500);
-    Serial.print(".");
-    tentativas++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWi-Fi conectado!");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("Falha ao conectar ao Wi-Fi.");
-  }
-
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/pin", HTTP_POST, handlePin);
-  server.on("/temp", HTTP_GET, handleTemp);
-
-  server.onNotFound([](){
-    addCorsHeaders();
-    server.send(404, "text/plain", "Not found");
-  });
-
-  server.begin();
-  Serial.println("Servidor HTTP iniciado.");
 }
 
-// ---------- LOOP ----------
-void loop() {
-  server.handleClient();
-
-  // Leitura da temperatura periodicamente
-  static unsigned long lastRead = 0;
-  if (millis() - lastRead > 5000) {  // a cada 5 segundos
-    lastRead = millis();
-    temperatura1 = dht1.readTemperature();
-    temperatura2 = dht2.readTemperature();
-
-    if (isnan(temperatura1)) {
-      Serial.println("Erro ao ler temperatura do DHT1!");
-    } else {
-      Serial.print("Temperatura Sensor 1: ");
-      Serial.print(temperatura1);
-      Serial.println(" °C");
-    }
-
-    if (isnan(temperatura2)) {
-      Serial.println("Erro ao ler temperatura do DHT2!");
-    } else {
-      Serial.print("Temperatura Sensor 2: ");
-      Serial.print(temperatura2);
-      Serial.println(" °C");
+void ligarMaquina(int id, unsigned long tempoPermitido) {
+  for (int i = 0; i < 2; i++) {
+    if (maquinas[i].id == id) {
+      maquinas[i].ativa = true;
+      maquinas[i].horaFim = millis() + tempoPermitido * 1000;
+      digitalWrite(maquinas[i].relePin, LOW);
+      Serial.printf("Maquina %d ligada por %lu segundos.\n", id, tempoPermitido);
+      return;
     }
   }
-
-  // Leitura do teclado
-  char key = keypad.getKey();
-  if (key != NO_KEY) {
-    Serial.print("Tecla pressionada: ");
-    Serial.println(key);
-    tratarEntrada(key);
-  }
 }
 
-// ---------- ROTAS ----------
-
-void handleRoot() {
-  addCorsHeaders();
-  server.send(200, "text/plain", "ESP32 Web Server ativo.");
-}
-
-void handlePin() {
-  addCorsHeaders();
-  if (!server.hasArg("plain")) {
-    server.send(400, "application/json", "{\"erro\":\"Sem corpo JSON\"}");
-    return;
-  }
-
-  String body = server.arg("plain");
-  StaticJsonDocument<200> doc;
-  DeserializationError err = deserializeJson(doc, body);
-
-  if (err || !doc.containsKey("pin") || !doc.containsKey("token")) {
-    server.send(400, "application/json", "{\"erro\":\"JSON inválido\"}");
-    return;
-  }
-
-  String pin = doc["pin"];
-  bool token = doc["token"];
-  int sensorId = doc["id"];
-
-  // Enviar o PIN para o backend
-  enviarPinParaAPI(pin);
-
-  // Atualizar o estado do LED baseado no token e no ID
-  atualizarLEDs(token, sensorId);
-
-  String json = "{\"energia\":" + String(energia ? "true" : "false") + "}";
-  server.send(200, "application/json", json);
-}
-
-void handleTemp() {
-  addCorsHeaders();
-  String json1 = "{\"id\":1, \"temperatura\":" + String(temperatura1, 1) + "}";
-  String json2 = "{\"id\":2, \"temperatura\":" + String(temperatura2, 1) + "}";
-  String response = "[" + json1 + "," + json2 + "]";
-  server.send(200, "application/json", response);
-}
-
-// Função para tratar a entrada do teclado
-void tratarEntrada(char entrada) {
-  if (entrada >= '0' && entrada <= '9') {
-    if (pinBuffer.length() < 4) {
-      pinBuffer += entrada;
-      Serial.print("PIN parcial: ");
-      Serial.println(pinBuffer);
+void desligarMaquina(int id) {
+  for (int i = 0; i < 2; i++) {
+    if (maquinas[i].id == id) {
+      maquinas[i].ativa = false;
+      digitalWrite(maquinas[i].relePin, HIGH);
+      Serial.printf("Maquina %d desligada.\n", id);
+      return;
     }
-  } 
-  else if (entrada == '*') {
-    if (pinBuffer.length() == 4) {
-      Serial.println("Enviando PIN...");
-      enviarPinParaAPI(pinBuffer);
-      pinBuffer = "";
-    } else {
-      Serial.println("PIN incompleto, necessário 4 dígitos.");
-    }
-  } 
-  else if (entrada == '#') {
-    pinBuffer = "";
-    Serial.println("PIN resetado.");
   }
 }
 
-// Função para enviar o PIN para a API
+// ---------- LEITURA DOS SENSORES ----------
+void lerTemperaturas() {
+  maquinas[0].ultimaTemp = maquinas[0].sensor->readTemperature();
+  maquinas[1].ultimaTemp = maquinas[1].sensor->readTemperature();
+}
+
+// ----------- ENVIA TEMPERATURA PARA API ----------
+void enviarTemperaturaAPI(int id, float temp) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.begin(apiTempURL);
+  http.addHeader("Content-Type", "application/json");
+
+  String body = "{\"id\":" + String(id) + ",\"temperatura\":" + String(temp,1) + "}";
+
+  int code = http.POST(body);
+  http.end();
+}
+
+// ---------- PROCESSA PIN ----------
 void enviarPinParaAPI(String pin) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Sem WiFi - não foi possível enviar PIN.");
+    Serial.println("Sem WiFi.");
     return;
   }
 
@@ -225,20 +145,104 @@ void enviarPinParaAPI(String pin) {
   String jsonBody = "{\"pin\":\"" + pin + "\"}";
   int httpCode = http.POST(jsonBody);
 
-  if (httpCode > 0) {
-    String payload = http.getString();
-    Serial.println("Resposta da API: " + payload);
-
-    StaticJsonDocument<200> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (!error && doc.containsKey("energia")) {
-      energia = doc["energia"];
-      Serial.print("Energia agora: ");
-      Serial.println(energia ? "ATIVA" : "DESLIGADA");
-    } else {
-      Serial.println("Erro ao interpretar resposta JSON da API.");
-    }
-  } else {
-    Serial.printf("Erro HTTP: %d\n", httpCode);
+  if (httpCode <= 0) {
+    Serial.println("Erro HTTP.");
+    return;
   }
 
+  String resposta = http.getString();
+  StaticJsonDocument<200> doc;
+
+  if (deserializeJson(doc, resposta)) {
+    Serial.println("Erro no JSON.");
+    return;
+  }
+
+  if (doc.containsKey("erro")) {
+    Serial.println("PIN incorreto.");
+    return;
+  }
+
+  int id = doc["id"];
+  int tempoPermitido = doc["tempoPermitido"]; // em segundos
+
+  Serial.printf("Liberado ID: %d por %d segundos.\n", id, tempoPermitido);
+
+  ligarMaquina(id, tempoPermitido);
+
+  http.end();
+}
+
+// ---------- TRATA TECLADO ----------
+void tratarEntrada(char entrada) {
+  if (entrada >= '0' && entrada <= '9') {
+    if (pinBuffer.length() < 4) pinBuffer += entrada;
+  }
+  else if (entrada == '*') {
+    if (pinBuffer.length() == 4) {
+      enviarPinParaAPI(pinBuffer);
+      pinBuffer = "";
+    }
+  }
+  else if (entrada == '#') {
+    pinBuffer = "";
+  }
+}
+
+// ---------------- ROTAS HTTP ----------------
+void handleRoot() {
+  addCorsHeaders();
+  server.send(200, "text/plain", "ESP32 OK");
+}
+
+// ------------------------------------------------------
+// ------------------------- SETUP ----------------------
+// ------------------------------------------------------
+void setup() {
+  Serial.begin(115200);
+
+  dht1.begin();
+  dht2.begin();
+
+  setupMaquinas();
+
+  WiFi.begin(ssid, password);
+  Serial.print("Conectando");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi conectado.");
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.begin();
+}
+
+// ------------------------------------------------------
+// -------------------------- LOOP ----------------------
+// ------------------------------------------------------
+void loop() {
+  server.handleClient();
+
+  char key = keypad.getKey();
+  if (key != NO_KEY) tratarEntrada(key);
+
+  lerTemperaturas();
+
+  // verificação de desligamento automático
+  for (int i = 0; i < 2; i++) {
+    if (maquinas[i].ativa && millis() >= maquinas[i].horaFim) {
+      if (maquinas[i].ultimaTemp < limiteTemperatura) {
+        desligarMaquina(maquinas[i].id);
+      }
+    }
+  }
+
+  // envio periódico
+  if (millis() - ultimoEnvioTemp > intervaloTemp) {
+    ultimoEnvioTemp = millis();
+    for (int i = 0; i < 2; i++) {
+      enviarTemperaturaAPI(maquinas[i].id, maquinas[i].ultimaTemp);
+    }
+  }
+}
