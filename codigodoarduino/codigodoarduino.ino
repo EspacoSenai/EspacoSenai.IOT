@@ -5,9 +5,9 @@
 #include "DHT.h"
 
 // -------- CONFIGURAÇÕES DE REDE --------
-const char* ssid = "Feio";
-const char* password = "iurd2023";
-const char* backendUrl = "http://192.168.1.6:8080";
+const char* ssid = "AAPM";
+const char* password = "alunosenai";
+const char* backendUrl = "https://espacosenai.azurewebsites.net";
 
 // -------- CONFIG RELÉS --------
 #define RELE1 23      // Relé para impressora 1
@@ -136,7 +136,7 @@ void enviarPinParaAPI(String pin) {
   }
 
   HTTPClient http;
-  String url = String(backendUrl) + "/reserva-impressora/pin";
+  String url = String(backendUrl) + "/reservas-impressora/liberar";
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
@@ -181,7 +181,7 @@ void enviarTemperatura(long id, double temp) {
   }
 
   HTTPClient http;
-  String url = String(backendUrl) + "/reserva-impressora/temperatura";
+  String url = String(backendUrl) + "/reservas-impressora/temperatura";
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
