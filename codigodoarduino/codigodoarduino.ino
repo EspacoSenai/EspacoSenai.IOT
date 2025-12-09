@@ -38,8 +38,6 @@ Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 // -------- VARIÁVEIS GLOBAIS --------
 String pinBuffer = "";
 
-// NOVO: Array para rastrear o estado de cada impressora (índices 1 a 4)
-// false = Livre/Desligada, true = Ocupada/Ligada
 bool impressorasOcupadas[5] = {false, false, false, false, false}; 
 
 // Array para controlar o tempo de leitura de temperatura individualmente
@@ -89,7 +87,6 @@ void loop() {
     tratarEntrada(key);
   }
 
-  // NOVO LOGICA: Percorre todas as impressoras para checar temperatura
   // Isso permite que múltiplas impressoras funcionem ao mesmo tempo
   unsigned long agora = millis();
   
@@ -127,7 +124,6 @@ void loop() {
 
 // ---------- FUNÇÕES ----------
 
-// Nova função para checar lotação
 bool todasImpressorasEstaoOcupadas() {
     if (impressorasOcupadas[1] && impressorasOcupadas[2] && impressorasOcupadas[3] && impressorasOcupadas[4]) {
         return true;
@@ -146,8 +142,6 @@ void tratarEntrada(char entrada) {
     Serial.println("\nPIN resetado.");
   } else if (entrada == '*') {
       
-    // --- LÓGICA SOLICITADA ---
-    // Verifica se tudo está ocupado ANTES de tentar enviar
     if (todasImpressorasEstaoOcupadas()) {
         Serial.println("\nBLOQUEADO: Todas as impressoras estão em uso.");
         pinBuffer = ""; // Limpa o buffer para impedir envio
