@@ -12,7 +12,7 @@ const char* backendUrl = "https://espacosenai.azurewebsites.net";
 // -------- CONFIG RELÉS --------
 #define RELE1 23      // Relé para impressora 1
 #define RELE2 19      // Relé para impressora 2
-#define RELE3 22       // Relé para impressora 3
+#define RELE3 22      // Relé para impressora 3
 #define RELE4 4       // Relé para impressora 4
 
 // -------- SENSORES DE TEMPERATURA (DHT22) --------
@@ -37,14 +37,20 @@ Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // -------- VARIÁVEIS GLOBAIS --------
 String pinBuffer = "";
-long impressoraAtivaId = 0; // 0 = nenhuma impressora ativa
-unsigned long ultimaVerificacaoTemp = 0;
+
+// NOVO: Array para rastrear o estado de cada impressora (índices 1 a 4)
+// false = Livre/Desligada, true = Ocupada/Ligada
+bool impressorasOcupadas[5] = {false, false, false, false, false}; 
+
+// Array para controlar o tempo de leitura de temperatura individualmente
+unsigned long ultimaVerificacaoTemp[5] = {0, 0, 0, 0, 0}; 
 
 // ---------- DECLARAÇÃO DE FUNÇÕES ----------
 void tratarEntrada(char entrada);
 void enviarPinParaAPI(String pin);
 void enviarTemperatura(long id, double temp);
 void controlarRele(long id, bool ligar);
+bool todasImpressorasEstaoOcupadas(); // Nova função auxiliar
 
 // ---------- SETUP ----------
 void setup() {
@@ -56,6 +62,7 @@ void setup() {
   pinMode(RELE3, OUTPUT);
   pinMode(RELE4, OUTPUT);
 
+  // Inicializa tudo desligado (HIGH para relés de lógica inversa)
   digitalWrite(RELE1, HIGH);
   digitalWrite(RELE2, HIGH);
   digitalWrite(RELE3, HIGH);
@@ -82,32 +89,51 @@ void loop() {
     tratarEntrada(key);
   }
 
-  if (impressoraAtivaId != 0) {
-    // ALTERAÇÃO 1: O intervalo foi mudado para 2 minutos (120000 ms)
-    if (millis() - ultimaVerificacaoTemp > 120000) {
-      ultimaVerificacaoTemp = millis();
-      double temp = NAN;
-      String erroMsg;
+  // NOVO LOGICA: Percorre todas as impressoras para checar temperatura
+  // Isso permite que múltiplas impressoras funcionem ao mesmo tempo
+  unsigned long agora = millis();
+  
+  for (int id = 1; id <= 4; id++) {
+    // Se a impressora 'id' estiver ligada (ocupada)
+    if (impressorasOcupadas[id]) {
+        
+        // Verifica se passou 2 minutos para ESSA impressora
+        if (agora - ultimaVerificacaoTemp[id] > 120000) {
+            ultimaVerificacaoTemp[id] = agora;
+            double temp = NAN;
+            String erroMsg = "";
 
-      if (impressoraAtivaId == 1) {
-        temp = dht1.readTemperature();
-        erroMsg = "Erro ao ler temperatura do Sensor 1!";
-      } else if (impressoraAtivaId == 2) {
-        temp = dht2.readTemperature();
-        erroMsg = "Erro ao ler temperatura do Sensor 2!";
-      }
+            // Apenas impressoras 1 e 2 possuem sensores no código original
+            if (id == 1) {
+                temp = dht1.readTemperature();
+                erroMsg = "Erro ao ler temperatura do Sensor 1!";
+            } else if (id == 2) {
+                temp = dht2.readTemperature();
+                erroMsg = "Erro ao ler temperatura do Sensor 2!";
+            }
+            // Impressoras 3 e 4 não têm sensor definido no código, então ignoramos
 
-      if (!isnan(temp)) {
-        Serial.printf("Temperatura Sensor %ld: %.2f°C\n", impressoraAtivaId, temp);
-        enviarTemperatura(impressoraAtivaId, temp);
-      } else {
-        Serial.println(erroMsg);
-      }
+            if (!isnan(temp)) {
+                Serial.printf("Temperatura Sensor %d: %.2f°C\n", id, temp);
+                enviarTemperatura(id, temp);
+            } else if (id == 1 || id == 2) {
+                // Só mostra erro se for um ID que deveria ter sensor
+                Serial.println(erroMsg);
+            }
+        }
     }
   }
 }
 
 // ---------- FUNÇÕES ----------
+
+// Nova função para checar lotação
+bool todasImpressorasEstaoOcupadas() {
+    if (impressorasOcupadas[1] && impressorasOcupadas[2] && impressorasOcupadas[3] && impressorasOcupadas[4]) {
+        return true;
+    }
+    return false;
+}
 
 void tratarEntrada(char entrada) {
   Serial.print(entrada);
@@ -119,6 +145,16 @@ void tratarEntrada(char entrada) {
     pinBuffer = "";
     Serial.println("\nPIN resetado.");
   } else if (entrada == '*') {
+      
+    // --- LÓGICA SOLICITADA ---
+    // Verifica se tudo está ocupado ANTES de tentar enviar
+    if (todasImpressorasEstaoOcupadas()) {
+        Serial.println("\nBLOQUEADO: Todas as impressoras estão em uso.");
+        pinBuffer = ""; // Limpa o buffer para impedir envio
+        return;         // Sai da função sem chamar a API
+    }
+    // -------------------------
+
     if (pinBuffer.length() == 4) {
       Serial.println("\nEnviando PIN: " + pinBuffer);
       enviarPinParaAPI(pinBuffer);
@@ -140,7 +176,7 @@ void enviarPinParaAPI(String pin) {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
-  StaticJsonDocument<100> docRequest;
+  StaticJsonDocument docRequest;
   docRequest["pin"] = pin;
   String jsonRequest;
   serializeJson(docRequest, jsonRequest);
@@ -151,7 +187,7 @@ void enviarPinParaAPI(String pin) {
     String payload = http.getString();
     Serial.println("Resposta da API: " + payload);
 
-    StaticJsonDocument<200> docResponse;
+    StaticJsonDocument docResponse;
     DeserializationError error = deserializeJson(docResponse, payload);
 
     if (error) {
@@ -159,12 +195,18 @@ void enviarPinParaAPI(String pin) {
       return;
     }
 
-    // ALTERAÇÃO 2: Verificando a chave "confirmacao" em vez de "success"
     bool confirmacao = docResponse["confirmacao"];
     if (confirmacao) {
-      impressoraAtivaId = docResponse["id"].as<long>();
-      Serial.printf("Reserva aprovada para a impressora %ld.\n", impressoraAtivaId);
-      controlarRele(impressoraAtivaId, true);
+      long idRecebido = docResponse["id"].as<long>();
+      
+      // Validação extra de segurança
+      if(idRecebido >= 1 && idRecebido <= 4) {
+          Serial.printf("Reserva aprovada para a impressora %ld.\n", idRecebido);
+          controlarRele(idRecebido, true);
+      } else {
+          Serial.println("API retornou um ID de impressora inválido.");
+      }
+
     } else {
       Serial.println("PIN inválido ou reserva recusada.");
     }
@@ -175,7 +217,7 @@ void enviarPinParaAPI(String pin) {
 }
 
 void enviarTemperatura(long id, double temp) {
-    if (WiFi.status() != WL_CONNECTED) {
+  if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Sem conexão Wi-Fi para enviar temperatura.");
     return;
   }
@@ -185,7 +227,7 @@ void enviarTemperatura(long id, double temp) {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
-  StaticJsonDocument<100> docRequest;
+  StaticJsonDocument docRequest;
   docRequest["id"] = id;
   docRequest["temperatura"] = temp;
   String jsonRequest;
@@ -200,7 +242,14 @@ void enviarTemperatura(long id, double temp) {
 }
 
 void controlarRele(long id, bool ligar) {
+  // Atualiza o estado global da impressora
+  if (id >= 1 && id <= 4) {
+      impressorasOcupadas[id] = ligar;
+  }
+
+  // Lógica inversa (LOW liga o relé)
   int estado = ligar ? LOW : HIGH;
+  
   switch (id) {
     case 1:
       digitalWrite(RELE1, estado);
